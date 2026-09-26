@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Секреты и локальные данные
+.env
+instance/
+*.db
+*.sqlite3
+
+# Тесты и линтеры
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.ruff_cache/
+
+# Отчёты сканеров
+reports/
+
+# IDE
+.idea/
+.vscode/
