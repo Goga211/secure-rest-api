@@ -12,6 +12,8 @@ python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env             # и задать JWT_SECRET
+flask --app wsgi init-db         # создать таблицы
+flask --app wsgi create-user alice   # пароль спросит скрыто
 flask --app wsgi run
 ```
 

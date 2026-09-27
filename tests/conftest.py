@@ -6,6 +6,7 @@ from flask.testing import FlaskClient
 
 from app import create_app
 from app.config import Settings
+from app.extensions import db
 
 
 @pytest.fixture
@@ -18,7 +19,10 @@ def settings() -> Settings:
 
 @pytest.fixture
 def app(settings: Settings) -> Flask:
-    return create_app(settings)
+    app = create_app(settings)
+    with app.app_context():
+        db.create_all()
+    return app
 
 
 @pytest.fixture
