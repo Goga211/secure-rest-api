@@ -10,6 +10,9 @@ from app.config import Settings
 from app.extensions import db
 from app.health import health_bp
 
+# Предел размера тела запроса: всё, что больше, отклоняется с 413
+MAX_CONTENT_LENGTH = 16 * 1024
+
 
 def create_app(settings: Settings | None = None) -> Flask:
     app_settings = settings or Settings.from_env()
@@ -19,6 +22,7 @@ def create_app(settings: Settings | None = None) -> Flask:
         SQLALCHEMY_DATABASE_URI=app_settings.database_url,
         JWT_SECRET=app_settings.jwt_secret,
         JWT_TTL_MINUTES=app_settings.jwt_ttl_minutes,
+        MAX_CONTENT_LENGTH=MAX_CONTENT_LENGTH,
     )
 
     db.init_app(app)

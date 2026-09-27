@@ -10,6 +10,7 @@ from app.extensions import db
 USERNAME_MAX_LENGTH = 64
 PASSWORD_HASH_MAX_LENGTH = 128
 POST_TITLE_MAX_LENGTH = 120
+POST_BODY_MAX_LENGTH = 5000
 
 
 def _utcnow() -> datetime:
