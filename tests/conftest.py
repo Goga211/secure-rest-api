@@ -1,12 +1,24 @@
 import secrets
+from dataclasses import dataclass
 
 import pytest
 from flask import Flask
 from flask.testing import FlaskClient
 
 from app import create_app
+from app.auth.tokens import issue_token
+from app.auth.users import create_user
 from app.config import Settings
 from app.extensions import db
+
+TEST_PASSWORD = "correct-horse-battery"
+
+
+@dataclass(frozen=True)
+class AuthUser:
+    id: int
+    username: str
+    headers: dict[str, str]
 
 
 @pytest.fixture
@@ -28,3 +40,16 @@ def app(settings: Settings) -> Flask:
 @pytest.fixture
 def client(app: Flask) -> FlaskClient:
     return app.test_client()
+
+
+@pytest.fixture
+def alice(app: Flask) -> AuthUser:
+    """Зарегистрированный пользователь с готовым заголовком Authorization."""
+    with app.app_context():
+        user = create_user("alice", TEST_PASSWORD)
+        issued = issue_token(user.id, app.config["JWT_SECRET"], app.config["JWT_TTL_MINUTES"])
+        return AuthUser(
+            id=user.id,
+            username=user.username,
+            headers={"Authorization": f"Bearer {issued.token}"},
+        )
