@@ -3,6 +3,7 @@
 from flask import Flask
 
 from app import models  # noqa: F401  (регистрирует модели до create_all)
+from app.auth.routes import auth_bp
 from app.cli import register_cli
 from app.config import Settings
 from app.extensions import db
@@ -22,4 +23,5 @@ def create_app(settings: Settings | None = None) -> Flask:
     db.init_app(app)
     register_cli(app)
     app.register_blueprint(health_bp)
+    app.register_blueprint(auth_bp)
     return app

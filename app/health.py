@@ -8,5 +8,5 @@ health_bp = Blueprint("health", __name__)
 
 
 @health_bp.get("/health")
-def health() -> tuple[Response, int]:
+def health() -> Response:
     return success({"status": "ok"})

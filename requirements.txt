@@ -1,3 +1,4 @@
+annotated-types==0.8.0
 bcrypt==5.0.0
 blinker==1.9.0
 click==8.5.0
@@ -6,7 +7,11 @@ Flask-SQLAlchemy==3.1.1
 itsdangerous==2.2.0
 Jinja2==3.1.6
 MarkupSafe==3.0.3
+pydantic==2.13.5
+pydantic_core==2.46.5
+PyJWT==2.15.0
 python-dotenv==1.2.3
 SQLAlchemy==2.1.1
+typing-inspection==0.4.4
 typing_extensions==4.16.0
 Werkzeug==3.1.8
