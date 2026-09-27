@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Тесты и линтер
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Установка зависимостей
+        run: pip install -r requirements-dev.txt
+
+      - name: Ruff (линтер)
+        run: ruff check .
+
+      - name: Ruff (форматирование)
+        run: ruff format --check .
+
+      - name: Pytest с покрытием
+        run: pytest --cov --cov-report=term-missing --cov-report=xml
+
+      - name: Отчёт о покрытии
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
