@@ -7,6 +7,7 @@ from app.api.routes import api_bp
 from app.auth.routes import auth_bp
 from app.cli import register_cli
 from app.config import Settings
+from app.errors import register_error_handlers
 from app.extensions import db, limiter
 from app.health import health_bp
 from app.security import register_security_headers
@@ -31,6 +32,7 @@ def create_app(settings: Settings | None = None) -> Flask:
     limiter.init_app(app)
     register_cli(app)
     register_security_headers(app)
+    register_error_handlers(app)
     app.register_blueprint(health_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(api_bp)
