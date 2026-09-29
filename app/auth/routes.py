@@ -7,6 +7,7 @@ from app.auth.passwords import dummy_hash, verify_password
 from app.auth.schemas import LoginRequest
 from app.auth.tokens import issue_token
 from app.auth.users import find_user
+from app.extensions import limiter
 from app.responses import error, success
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
@@ -15,8 +16,12 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 # какие логины существуют
 INVALID_CREDENTIALS = "Неверный логин или пароль"
 
+# Защита от перебора паролей: не больше 5 попыток входа в минуту с одного IP
+LOGIN_RATE_LIMIT = "5 per minute"
+
 
 @auth_bp.post("/login")
+@limiter.limit(LOGIN_RATE_LIMIT)
 def login() -> Response:
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):

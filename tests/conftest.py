@@ -26,6 +26,8 @@ def settings() -> Settings:
     return Settings(
         database_url="sqlite:///:memory:",
         jwt_secret=secrets.token_urlsafe(48),
+        # Лимит проверяется отдельно в test_rate_limit.py
+        rate_limit_enabled=False,
     )
 
 

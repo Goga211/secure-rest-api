@@ -13,6 +13,7 @@ def test_from_env_reads_values() -> None:
         "DATABASE_URL": "sqlite:///custom.db",
         "JWT_SECRET": VALID_SECRET,
         "JWT_TTL_MINUTES": "30",
+        "RATE_LIMIT_ENABLED": "true",
     }
 
     settings = Settings.from_env(env)
@@ -20,6 +21,7 @@ def test_from_env_reads_values() -> None:
     assert settings.database_url == "sqlite:///custom.db"
     assert settings.jwt_secret == VALID_SECRET
     assert settings.jwt_ttl_minutes == 30
+    assert settings.rate_limit_enabled is True
 
 
 def test_from_env_applies_defaults() -> None:
@@ -27,6 +29,19 @@ def test_from_env_applies_defaults() -> None:
 
     assert settings.database_url == DEFAULT_DATABASE_URL
     assert settings.jwt_ttl_minutes == DEFAULT_JWT_TTL_MINUTES
+    assert settings.rate_limit_enabled is True
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("false", False), ("0", False), ("TRUE", True)])
+def test_rate_limit_enabled_from_env(raw: str, expected: bool) -> None:
+    settings = Settings.from_env({"JWT_SECRET": VALID_SECRET, "RATE_LIMIT_ENABLED": raw})
+
+    assert settings.rate_limit_enabled is expected
+
+
+def test_invalid_rate_limit_flag_raises() -> None:
+    with pytest.raises(ConfigError, match="RATE_LIMIT_ENABLED"):
+        Settings.from_env({"JWT_SECRET": VALID_SECRET, "RATE_LIMIT_ENABLED": "maybe"})
 
 
 def test_missing_secret_raises() -> None:
