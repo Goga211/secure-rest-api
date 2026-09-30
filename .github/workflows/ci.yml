@@ -41,3 +41,32 @@ jobs:
         with:
           name: coverage
           path: coverage.xml
+
+  sast:
+    name: SAST (bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Установка зависимостей
+        run: pip install -r requirements-dev.txt
+
+      - name: Bandit (падает на medium и выше)
+        run: bandit -r app -ll
+
+      - name: Bandit (HTML-отчёт)
+        if: always()
+        run: bandit -r app -f html -o bandit-report.html --exit-zero
+
+      - name: Отчёт bandit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bandit-report
+          path: bandit-report.html
