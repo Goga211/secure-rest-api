@@ -99,3 +99,28 @@ jobs:
         with:
           name: pip-audit-report
           path: pip-audit-report.md
+
+  sca-dependency-check:
+    name: SCA (OWASP Dependency-Check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: OWASP Dependency-Check (падает при CVSS 7 и выше)
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: secure-rest-api
+          path: .
+          format: HTML
+          out: reports
+          args: >-
+            --enableExperimental
+            --failOnCVSS 7
+            --nvdApiKey ${{ secrets.NVD_API_KEY }}
+
+      - name: Отчёт Dependency-Check
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-check-report
+          path: reports
