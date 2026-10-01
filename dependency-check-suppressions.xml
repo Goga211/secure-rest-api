@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+  <suppress>
+    <notes><![CDATA[
+      CVE-2025-45770 (PyJWT, "weak encryption"): оспоренная CVE. Мейнтейнеры PyJWT
+      считают, что длину HMAC-ключа выбирает приложение, а не библиотека, поэтому
+      в OSV и PyPI Advisory её нет и pip-audit её не находит. В этом проекте риск закрыт:
+      Settings требует JWT_SECRET не короче 32 символов (не меньше 256 бит, как
+      требует RFC 7518 для HS256), см. app/config.py и
+      tests/test_config.py::test_short_secret_raises.
+    ]]></notes>
+    <packageUrl regex="true">^pkg:pypi/pyjwt@.*$</packageUrl>
+    <cve>CVE-2025-45770</cve>
+  </suppress>
+</suppressions>

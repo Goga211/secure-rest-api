@@ -116,6 +116,7 @@ jobs:
           args: >-
             --enableExperimental
             --failOnCVSS 7
+            --suppression dependency-check-suppressions.xml
             --nvdApiKey ${{ secrets.NVD_API_KEY }}
 
       - name: Отчёт Dependency-Check
