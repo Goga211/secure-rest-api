@@ -41,3 +41,87 @@ jobs:
         with:
           name: coverage
           path: coverage.xml
+
+  sast:
+    name: SAST (bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Установка зависимостей
+        run: pip install -r requirements-dev.txt
+
+      - name: Bandit (падает на medium и выше)
+        run: bandit -r app -ll
+
+      - name: Bandit (HTML-отчёт)
+        if: always()
+        run: bandit -r app -f html -o bandit-report.html --exit-zero
+
+      - name: Отчёт bandit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bandit-report
+          path: bandit-report.html
+
+  sca-pip-audit:
+    name: SCA (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Установка pip-audit
+        run: pip install -r requirements-dev.txt
+
+      - name: pip-audit (падает при найденных уязвимостях)
+        run: pip-audit -r requirements.txt
+
+      - name: pip-audit (отчёт в Markdown)
+        if: always()
+        run: pip-audit -r requirements.txt -f markdown -o pip-audit-report.md || true
+
+      - name: Отчёт pip-audit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.md
+
+  sca-dependency-check:
+    name: SCA (OWASP Dependency-Check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: OWASP Dependency-Check (падает при CVSS 7 и выше)
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: secure-rest-api
+          path: .
+          format: HTML
+          out: reports
+          args: >-
+            --enableExperimental
+            --failOnCVSS 7
+            --suppression dependency-check-suppressions.xml
+            --nvdApiKey ${{ secrets.NVD_API_KEY }}
+
+      - name: Отчёт Dependency-Check
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-check-report
+          path: reports
