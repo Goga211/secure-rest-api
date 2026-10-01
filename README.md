@@ -1,5 +1,7 @@
 # secure-rest-api
 
+[![CI](https://github.com/Goga211/secure-rest-api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Goga211/secure-rest-api/actions/workflows/ci.yml?query=branch%3Amain)
+
 Учебный REST API на Flask с упором на безопасность (ЛР1 по курсу «Информационная безопасность»,
 ИТМО): JWT-аутентификация, хэширование паролей bcrypt, защита от SQL-инъекций и XSS, проверки
 SAST и SCA в CI.
@@ -192,7 +194,33 @@ GitHub Actions (`.github/workflows/ci.yml`) запускается на кажд
 
 ### Скриншоты отчётов
 
-Скриншоты отчётов bandit, pip-audit и Dependency-Check добавит автор.
+Запуск CI #17 (коммит `3051ab9`): все четыре job прошли успешно, сохранено 4 артефакта.
+
+![Запуск CI](docs/screenshots/ci-run.png)
+
+**SAST, bandit** (`bandit-report.html`): 463 строки кода, замечаний уровня medium и выше нет.
+Одно замечание уровня low, B105 «возможный захардкоженный пароль» на строку `"token_type":
+"Bearer"` в `app/auth/routes.py`. Это ложное срабатывание: `Bearer` это тип токена по
+RFC 6750, а не пароль. CI падает только на medium и выше (`-ll`), поэтому замечание не
+блокирует сборку, но остаётся в отчёте.
+
+![Отчёт bandit](docs/screenshots/bandit-report.png)
+
+**SCA, OWASP Dependency-Check** (`dependency-check-report.html`): проверено 26 зависимостей,
+уязвимых 0, одна уязвимость подавлена с обоснованием (CVE-2025-45770, разбор ниже).
+
+![Отчёт Dependency-Check](docs/screenshots/dependency-check-report.png)
+
+**SCA, pip-audit** (`pip-audit-report.json`): проверено 22 пакета, уязвимостей нет:
+
+```json
+{"dependencies": [{"name": "annotated-types", "version": "0.8.0", "vulns": []},
+  {"name": "bcrypt", "version": "5.0.0", "vulns": []},
+  ...
+  {"name": "pyjwt", "version": "2.15.0", "vulns": []},
+  ...
+  {"name": "werkzeug", "version": "3.1.8", "vulns": []}], "fixes": []}
+```
 
 ## Сравнение pip-audit и OWASP Dependency-Check
 
@@ -203,7 +231,7 @@ GitHub Actions (`.github/workflows/ci.yml`) запускается на кажд
 | Поддержка Python | основная задача инструмента | анализаторы Python экспериментальные, нужен флаг `--enableExperimental` |
 | Скорость в CI | около 30 секунд вместе с установкой зависимостей | около 30 секунд: action использует заранее скачанную базу (`--noupdate`); без неё первое скачивание NVD занимает десятки минут |
 | Ложные срабатывания | мало: база ведётся по пакетам PyPI | больше: CPE совпадают неточно, в NVD попадают оспоренные CVE |
-| Результат в этом проекте | 23 пакета, уязвимостей не найдено | CVE-2025-45770 в PyJWT 2.15.0, CVSS 7.0 |
+| Результат в этом проекте | 22 пакета, уязвимостей не найдено | 26 зависимостей, CVE-2025-45770 в PyJWT 2.15.0 (CVSS 7.0), подавлена с обоснованием |
 
 **Разбор CVE-2025-45770.** Dependency-Check остановил CI на CVE-2025-45770 («слабое
 шифрование» в PyJWT), а pip-audit её не нашёл. CVE оспорена: мейнтейнеры PyJWT считают, что
@@ -214,7 +242,8 @@ RFC 7518) не даёт запустить приложение. CVE подав�
 
 **Вывод.** Инструменты дополняют друг друга. pip-audit точнее для Python и почти не даёт ложных
 срабатываний, Dependency-Check шире по охвату (NVD, другие экосистемы), но требует разбора
-находок и подавлений с обоснованием. bandit по коду `app/` (463 строки) замечаний не нашёл.
+находок и подавлений с обоснованием. bandit по коду `app/` (463 строки) нашёл одно ложное
+замечание уровня low, разобранное выше.
 
 ## Известные ограничения
 
