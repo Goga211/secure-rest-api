@@ -89,16 +89,18 @@ jobs:
       - name: pip-audit (падает при найденных уязвимостях)
         run: pip-audit -r requirements.txt
 
-      - name: pip-audit (отчёт в Markdown)
+      # JSON, а не Markdown: при отсутствии уязвимостей Markdown-отчёт не создаётся,
+      # а JSON всегда содержит список проверенных пакетов
+      - name: pip-audit (отчёт в JSON)
         if: always()
-        run: pip-audit -r requirements.txt -f markdown -o pip-audit-report.md || true
+        run: pip-audit -r requirements.txt -f json -o pip-audit-report.json || true
 
       - name: Отчёт pip-audit
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: pip-audit-report
-          path: pip-audit-report.md
+          path: pip-audit-report.json
 
   sca-dependency-check:
     name: SCA (OWASP Dependency-Check)
