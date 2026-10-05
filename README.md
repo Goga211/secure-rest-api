@@ -15,7 +15,7 @@ pytest, ruff.
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env             # и задать JWT_SECRET
+cp .env.example .env             # Windows: copy .env.example .env; и задать JWT_SECRET
 flask --app wsgi init-db         # создать таблицы
 flask --app wsgi create-user alice   # пароль спросит скрыто
 flask --app wsgi run
@@ -166,6 +166,7 @@ curl -s -X POST http://127.0.0.1:5000/api/posts \
 | XSS | `title`, `body`, `author` экранируются на выходе (`markupsafe.escape`), в БД хранится исходный текст; CSP `default-src 'none'` и `X-Content-Type-Options: nosniff` | `app/api/serializers.py`, `app/security.py` | `tests/test_xss.py` |
 | Утечка паролей | только хэш bcrypt (12 раундов, соль в хэше); пароли длиннее 72 байт отклоняются явно, потому что bcrypt молча обрезает лишнее | `app/auth/passwords.py` | `tests/test_passwords.py` |
 | Подделка токена | JWT HS256, список алгоритмов задан жёстко (токен с `alg: none` не пройдёт), обязательны claims `sub`, `iss`, `iat`, `exp`, проверяется издатель; срок жизни 15 минут; пользователь из токена проверяется в БД | `app/auth/tokens.py`, `app/auth/decorators.py` | `tests/test_tokens.py`, `tests/test_jwt_required.py` |
+| Незащищённый эндпоинт | декоратор `jwt_required` на каждом маршруте `/api/*`; тест обходит все зарегистрированные маршруты `/api/*` и требует 401 без токена, поэтому эндпоинт без декоратора роняет CI | `app/api/routes.py` | `tests/test_api_auth_coverage.py` |
 | Подбор логинов | один ответ 401 для неверного логина и неверного пароля; для несуществующего логина пароль сверяется с хэшем-заглушкой, чтобы время ответа не отличалось | `app/auth/routes.py`, `app/auth/passwords.py` | `tests/test_login.py` |
 | Перебор паролей | не больше 5 попыток входа в минуту с одного IP (Flask-Limiter), сверх лимита 429 | `app/auth/routes.py`, `app/extensions.py` | `tests/test_rate_limit.py` |
 | Некорректный ввод, mass assignment | схемы pydantic: `strict` (без приведения типов), `extra="forbid"` (лишние поля вроде `role` или `author` запрещены), ограничения длины | `app/auth/schemas.py`, `app/api/schemas.py` | `tests/test_login.py`, `tests/test_api_posts.py` |
@@ -174,7 +175,7 @@ curl -s -X POST http://127.0.0.1:5000/api/posts \
 | Кликджекинг, MIME-sniffing, утечка Referer, кэширование | заголовки `X-Frame-Options: DENY`, `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` на всех ответах, включая ошибки | `app/security.py` | `tests/test_security_headers.py` |
 | Утечка секретов | секреты только из переменных окружения, `.env` в `.gitignore`; `JWT_SECRET` короче 32 символов не даёт запустить приложение; секрет не попадает в `repr` настроек | `app/config.py` | `tests/test_config.py` |
 
-Всего 122 теста, покрытие 100% (минимум для CI 80%).
+Всего 124 теста, покрытие 100% (минимум для CI 80%).
 
 ## CI/CD
 
@@ -191,6 +192,11 @@ GitHub Actions (`.github/workflows/ci.yml`) запускается на кажд
 Где смотреть отчёты: вкладка **Actions** репозитория → нужный запуск workflow **CI** → блок
 **Artifacts** внизу страницы запуска. Ключ NVD для Dependency-Check хранится в секрете
 репозитория `NVD_API_KEY`.
+
+Защита самого pipeline: сторонний action Dependency-Check, который получает секрет, закреплён
+по SHA коммита, а не по плавающей ветке; раннер зафиксирован (`ubuntu-24.04`); `checkout` не
+сохраняет токен CI в `.git` (`persist-credentials: false`), а у самого токена только право
+на чтение.
 
 ### Скриншоты отчётов
 
@@ -259,3 +265,6 @@ RFC 7518) не даёт запустить приложение. CVE подав�
 - **Пользователи создаются только через CLI.** Эндпоинта регистрации и смены пароля нет.
 - **Подавление CVE-2025-45770 нужно пересматривать** при обновлении PyJWT или изменении статуса
   CVE.
+- **Образ внутри Dependency-Check action не закреплён.** Сам action закреплён по SHA, но его
+  Dockerfile собирается из `owasp/dependency-check-action:latest`; полностью воспроизводимой
+  сборки это не даёт.
