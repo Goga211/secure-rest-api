@@ -4,6 +4,8 @@ on:
   push:
   pull_request:
 
+# Токен CI только на чтение; checkout не сохраняет его в .git, поэтому шаги после
+# checkout (в том числе сторонние actions) не могут им воспользоваться
 permissions:
   contents: read
 
@@ -14,9 +16,11 @@ concurrency:
 jobs:
   test:
     name: Тесты и линтер
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v6
         with:
@@ -44,9 +48,11 @@ jobs:
 
   sast:
     name: SAST (bandit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v6
         with:
@@ -73,9 +79,11 @@ jobs:
 
   sca-pip-audit:
     name: SCA (pip-audit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v6
         with:
@@ -104,12 +112,16 @@ jobs:
 
   sca-dependency-check:
     name: SCA (OWASP Dependency-Check)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: OWASP Dependency-Check (падает при CVSS 7 и выше)
-        uses: dependency-check/Dependency-Check_Action@main
+        # Сторонний action получает секрет NVD_API_KEY, поэтому закреплён по SHA коммита,
+        # а не по плавающей ветке main
+        uses: dependency-check/Dependency-Check_Action@1e54355a8b4c8abaa8cc7d0b70aa655a3bb15a6c # main от 2025-12-10
         with:
           project: secure-rest-api
           path: .
