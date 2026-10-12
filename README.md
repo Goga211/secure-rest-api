@@ -244,7 +244,7 @@ def _escape_html(text: str) -> str:
 payload = jwt.decode(
     token,
     secret,
-    algorithms=[JWT_ALGORITHM],          # "HS256", алгоритм из заголовка токена не используется
+    algorithms=[JWT_ALGORITHM],  # "HS256", алгоритм из заголовка токена не используется
     issuer=JWT_ISSUER,
     options={"require": REQUIRED_CLAIMS},  # sub, iss, iat, exp
 )
