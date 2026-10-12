@@ -2,9 +2,8 @@
 
 [![CI](https://github.com/Goga211/secure-rest-api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Goga211/secure-rest-api/actions/workflows/ci.yml?query=branch%3Amain)
 
-Учебный REST API на Flask с упором на безопасность (ЛР1 по курсу «Информационная безопасность»,
-ИТМО): JWT-аутентификация, хэширование паролей bcrypt, защита от SQL-инъекций и XSS, проверки
-SAST и SCA в CI.
+REST API на Flask с защитой от типовых уязвимостей: JWT-аутентификация, хэширование паролей
+bcrypt, защита от SQL-инъекций и XSS, проверки SAST и SCA в CI.
 
 Стек: Python 3.12, Flask 3, SQLAlchemy 2 (SQLite), pydantic 2, bcrypt, PyJWT, Flask-Limiter,
 pytest, ruff.
@@ -15,7 +14,7 @@ pytest, ruff.
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env             # Windows: copy .env.example .env; и задать JWT_SECRET
+cp .env.example .env             # Windows: copy .env.example .env, затем задать JWT_SECRET в .env
 flask --app wsgi init-db         # создать таблицы
 flask --app wsgi create-user alice   # пароль спросит скрыто
 flask --app wsgi run
@@ -89,7 +88,7 @@ pip-audit -r requirements.txt   # SCA
 
 ## Примеры curl
 
-Вход, ответ с токеном:
+Вход, ответ с токеном (токен сокращён):
 
 ```bash
 curl -s -X POST http://127.0.0.1:5000/auth/login \
@@ -184,7 +183,7 @@ GitHub Actions (`.github/workflows/ci.yml`) запускается на кажд
 
 | Job | Инструмент | Что проверяет | Когда падает | Артефакт |
 |---|---|---|---|---|
-| Тесты и линтер | ruff, pytest | стиль и ошибки кода (в том числе правила безопасности `S` из bandit), формат, тесты | замечание ruff, упавший тест, покрытие ниже 80% | `coverage` |
+| Тесты и линтер | ruff, pytest | стиль и ошибки кода (в том числе правила безопасности `S` (аналог bandit в ruff)), формат, тесты | замечание ruff, упавший тест, покрытие ниже 80% | `coverage` |
 | SAST (bandit) | bandit | исходный код `app/`: опасные вызовы, захардкоженные секреты, небезопасные функции | находка уровня medium и выше | `bandit-report` (HTML) |
 | SCA (pip-audit) | pip-audit | зависимости из `requirements.txt` по базе уязвимостей PyPI | любая известная уязвимость | `pip-audit-report` (JSON) |
 | SCA (OWASP Dependency-Check) | Dependency-Check | зависимости по базе NVD | уязвимость с CVSS 7.0 и выше | `dependency-check-report` (HTML) |
@@ -235,13 +234,12 @@ RFC 6750, а не пароль. CI падает только на medium и вы
 | Источник данных | база уязвимостей PyPI (PyPA Advisory Database), по желанию OSV | NVD (база CVE), сопоставление по идентификаторам CPE |
 | Как находит пакет | точное имя и версия пакета PyPI | по имени подбираются CPE, для PyJWT их два: `pyjwt_project:pyjwt` и `jwt_project:jwt` |
 | Поддержка Python | основная задача инструмента | анализаторы Python экспериментальные, нужен флаг `--enableExperimental` |
-| Скорость в CI | около 30 секунд вместе с установкой зависимостей | около 30 секунд: action использует заранее скачанную базу (`--noupdate`); без неё первое скачивание NVD занимает десятки минут |
+| Скорость в CI | около 40 секунд вместе с установкой зависимостей | около 40 секунд: база NVD обновляется при каждом запуске, ключ `NVD_API_KEY` берётся из секрета |
 | Ложные срабатывания | мало: база ведётся по пакетам PyPI | больше: CPE совпадают неточно, в NVD попадают оспоренные CVE |
 | Результат в этом проекте | 22 пакета, уязвимостей не найдено | 26 зависимостей, CVE-2025-45770 в PyJWT 2.15.0 (CVSS 7.0), подавлена с обоснованием |
 
 **Разбор CVE-2025-45770.** Dependency-Check остановил CI на CVE-2025-45770 («слабое
-шифрование» в PyJWT), а pip-audit её не нашёл. CVE оспорена: мейнтейнеры PyJWT считают, что
-длину ключа HMAC выбирает приложение, а не библиотека, поэтому в базах PyPI и OSV её нет. В
+шифрование» в PyJWT), а pip-audit её не нашёл. CVE оспорена: длину ключа HMAC выбирает приложение, а не библиотека, поэтому в базах PyPI и OSV её нет. В
 этом проекте риск закрыт: `JWT_SECRET` короче 32 символов (256 бит, минимум для HS256 по
 RFC 7518) не даёт запустить приложение. CVE подавлена в `dependency-check-suppressions.xml`
 с этим обоснованием, остальные находки Dependency-Check по-прежнему останавливают CI.
