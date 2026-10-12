@@ -119,8 +119,9 @@ jobs:
           persist-credentials: false
 
       - name: OWASP Dependency-Check (падает при CVSS 7 и выше)
-        # Сторонний action получает секрет NVD_API_KEY, поэтому закреплён по SHA коммита,
-        # а не по плавающей ветке main
+        # Сторонний action закреплён по SHA коммита, а не по плавающей ветке main.
+        # Action сам добавляет --noupdate и берёт базу NVD из своего образа, поэтому ключ
+        # NVD ему не нужен и секреты не передаются: шаг работает и в PR из форков
         uses: dependency-check/Dependency-Check_Action@1e54355a8b4c8abaa8cc7d0b70aa655a3bb15a6c # main от 2025-12-10
         with:
           project: secure-rest-api
@@ -131,7 +132,6 @@ jobs:
             --enableExperimental
             --failOnCVSS 7
             --suppression dependency-check-suppressions.xml
-            --nvdApiKey ${{ secrets.NVD_API_KEY }}
 
       - name: Отчёт Dependency-Check
         if: always()
