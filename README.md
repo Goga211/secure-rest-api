@@ -44,6 +44,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 pip install -r requirements-dev.txt
 pytest --cov          # тесты, покрытие не ниже 80%
 ruff check .          # линтер
+ruff format --check . # формат, включая python-блоки в README
 bandit -r app -ll     # SAST
 pip-audit -r requirements.txt   # SCA
 ```
@@ -127,7 +128,7 @@ TOKEN="<access_token из ответа на вход>"
 curl -s http://127.0.0.1:5000/api/data -H "Authorization: Bearer $TOKEN"
 ```
 
-Запрос без токена, 401 (заголовки `Server`, `Date`, `Connection` опущены):
+Запрос без токена, 401 (заголовки `Server`, `Date`, `Content-Length`, `Connection` опущены):
 
 ```bash
 curl -si http://127.0.0.1:5000/api/data
@@ -186,8 +187,8 @@ def find_user(username: str) -> User | None:
 
 SQLAlchemy превращает это в `SELECT ... FROM users WHERE users.username = ?`, значение уходит
 отдельно от текста запроса. Посты создаются так же, через `Post(title=..., body=...)` и
-`db.session.add`. В `tests/test_sqli.py` проверяются `' OR '1'='1' --`, `' OR 1=1 --` и
-`UNION SELECT` в логине и пароле (ответ 401, токена нет), а заголовок поста
+`db.session.add`. В `tests/test_sqli.py` в логин подставляются `' OR '1'='1' --`, `admin'--` и
+`UNION SELECT`, в пароль `' OR '1'='1' --` и `' OR 1=1 --` (ответ 401, токена нет), а заголовок поста
 `'); DROP TABLE posts; --` сохраняется как текст, таблица остаётся на месте.
 
 ### XSS (OWASP A03 Injection)
@@ -339,7 +340,7 @@ No known vulnerabilities found
 
 pip-audit остановил [запуск CI #20](https://github.com/Goga211/secure-rest-api/actions/runs/38223336152)
 (коммит `b133ead`): в зависимостях была уязвимая версия Werkzeug. Остальные три job в этом
-запуске прошли, Dependency-Check эту CVE не показал. [Лог job pip-audit](https://github.com/Goga211/secure-rest-api/actions/runs/38223336152/job/114724682982):
+запуске прошли, Dependency-Check сборку не остановил. [Лог job pip-audit](https://github.com/Goga211/secure-rest-api/actions/runs/38223336152/job/114724682982):
 
 ```
 Found 1 known vulnerability in 1 package
@@ -367,10 +368,10 @@ werkzeug 3.1.8   CVE-2026-102598 3.1.9
 | Результат в этом проекте | 22 пакета, уязвимостей не найдено | 26 зависимостей, CVE-2025-45770 в PyJWT 2.15.0 (CVSS 7.0), подавлена с обоснованием |
 
 **Разбор CVE-2025-45770.** Dependency-Check остановил CI на CVE-2025-45770 («слабое
-шифрование» в PyJWT), а pip-audit её не нашёл. CVE оспорена: длину ключа HMAC выбирает приложение, а не библиотека, поэтому в базах PyPI и
-OSV её нет. В этом проекте риск закрыт: `JWT_SECRET` короче 32 символов (256 бит, минимум для
-HS256 по RFC 7518) не даёт запустить приложение. CVE подавлена в `dependency-check-suppressions.xml`
-с этим обоснованием, остальные находки Dependency-Check по-прежнему останавливают CI.
+шифрование» в PyJWT), а pip-audit её не нашёл. CVE оспорена: длину ключа HMAC выбирает
+приложение, а не библиотека, поэтому в базах PyPI и OSV её нет. В этом проекте риск закрыт:
+`JWT_SECRET` короче 32 символов (256 бит, минимум для HS256 по RFC 7518) не даёт запустить
+приложение. CVE подавлена в `dependency-check-suppressions.xml` с этим обоснованием, остальные находки Dependency-Check по-прежнему останавливают CI.
 
 **Вывод.** Инструменты дополняют друг друга. pip-audit точнее для Python и почти не даёт ложных
 срабатываний, Dependency-Check шире по охвату (NVD, другие экосистемы), но требует разбора
