@@ -224,7 +224,7 @@ RFC 6750, а не пароль. CI падает только на medium и вы
   ...
   {"name": "pyjwt", "version": "2.15.0", "vulns": []},
   ...
-  {"name": "werkzeug", "version": "3.1.8", "vulns": []}], "fixes": []}
+  {"name": "werkzeug", "version": "3.1.9", "vulns": []}], "fixes": []}
 ```
 
 ## Сравнение pip-audit и OWASP Dependency-Check
