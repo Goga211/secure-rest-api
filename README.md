@@ -14,7 +14,7 @@ pytest, ruff.
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate            # Windows (Git Bash): source .venv/Scripts/activate
+source .venv/Scripts/activate        # Windows, Git Bash; Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env                 # задать в .env JWT_SECRET, команда ниже
 flask --app wsgi init-db             # создать таблицы
@@ -95,7 +95,7 @@ Dependency-Check принимает за пакеты. Откуда взялся
 Терминал 2: один раз подготовка, дальше команды по шагам.
 
 ```bash
-source .venv/bin/activate            # Windows (Git Bash): source .venv/Scripts/activate
+source .venv/Scripts/activate        # Windows, Git Bash; Linux/macOS: source .venv/bin/activate
 export PYTHONIOENCODING=utf-8
 B=http://127.0.0.1:5000
 J='Content-Type: application/json'
