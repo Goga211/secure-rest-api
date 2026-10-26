@@ -14,7 +14,7 @@ pytest, ruff.
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate            # Windows: .venv\Scripts\activate
+source .venv/bin/activate            # Windows (Git Bash): source .venv/Scripts/activate
 pip install -r requirements.txt
 cp .env.example .env                 # задать в .env JWT_SECRET, команда ниже
 flask --app wsgi init-db             # создать таблицы
@@ -91,35 +91,140 @@ Dependency-Check принимает за пакеты. Откуда взялся
 
 ## Проверка через curl
 
+Двенадцать проверок, по одной на каждую меру защиты. Терминал 1: сервер (`flask --app wsgi run`).
+Терминал 2: один раз подготовка, дальше команды по шагам.
+
 ```bash
-# вход, в ответе токен
-curl -s -X POST http://127.0.0.1:5000/auth/login -H "Content-Type: application/json" \
-  -d '{"username": "alice", "password": "correct-horse-battery"}'
-# {"data": {"access_token": "eyJhbGciOiJIUzI1NiIs...", "expires_in": 900, "token_type": "Bearer"}, ...}
-
-# неверный пароль, тот же ответ, что и для несуществующего логина
-# 401 {"data": null, "error": "Неверный логин или пароль", "success": false}
-
-# без токена
-curl -si http://127.0.0.1:5000/api/data
-# HTTP/1.1 401 UNAUTHORIZED
-# WWW-Authenticate: Bearer realm="api"
-# Content-Security-Policy: default-src 'none'; frame-ancestors 'none'
-# X-Content-Type-Options: nosniff
-# {"data": null, "error": "Требуется заголовок Authorization: Bearer <token>", "success": false}
-
-# с токеном: 200 и список постов
-curl -s http://127.0.0.1:5000/api/data -H "Authorization: Bearer $TOKEN"
-
-# HTML в посте возвращается экранированным
-curl -s -X POST http://127.0.0.1:5000/api/posts -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" -d '{"title": "Hello", "body": "<b>first</b> post"}'
-# 201 {"data": {"author": "alice", "body": "&lt;b&gt;first&lt;/b&gt; post", "id": 1, ...}, ...}
+source .venv/bin/activate            # Windows (Git Bash): source .venv/Scripts/activate
+export PYTHONIOENCODING=utf-8
+B=http://127.0.0.1:5000
+J='Content-Type: application/json'
+alias pp='python -m json.tool --no-ensure-ascii'
 ```
 
-Шестая попытка входа за минуту получает 429. Кириллицу в теле запроса из Windows лучше
-передавать файлом (`--data-binary @post.json`): curl в Windows отправляет `-d` в кодировке
-консоли, а не в UTF-8.
+`B` это адрес сервера, `J` заголовок JSON, `pp` форматирует ответ и показывает кириллицу (сервер
+отдаёт её как `Т...`).
+
+**1. Сервер работает.**
+
+```bash
+curl -s $B/health | pp
+```
+
+Ответ: `"status": "ok"`.
+
+**2. Неверный пароль и несуществующий логин.**
+
+```bash
+curl -s -X POST $B/auth/login -H "$J" -d '{"username": "alice", "password": "wrong-password"}' | pp
+curl -s -X POST $B/auth/login -H "$J" -d '{"username": "nobody", "password": "wrong-password"}' | pp
+```
+
+Оба раза 401 и `"error": "Неверный логин или пароль"`: по ответу нельзя узнать, есть ли такой
+логин.
+
+**3. Вход, получение JWT.**
+
+```bash
+curl -s -X POST $B/auth/login -H "$J" -d '{"username": "alice", "password": "correct-horse-battery"}' | pp
+```
+
+В ответе `access_token`, `"expires_in": 900`, `"token_type": "Bearer"`. Токен сохраняется в
+переменную для следующих шагов:
+
+```bash
+TOKEN=<access_token из ответа>
+```
+
+**4. Что внутри токена.**
+
+```bash
+python -c "import jwt, sys; t = sys.argv[1]; print(jwt.get_unverified_header(t)); print(jwt.decode(t, options={'verify_signature': False}))" $TOKEN
+```
+
+Ответ: `{'alg': 'HS256', 'typ': 'JWT'}` и `{'sub': '1', 'iss': 'secure-rest-api', 'iat': ..., 'exp': ...}`.
+Заголовок и payload не зашифрованы, токен защищает подпись.
+
+**5. Данные без токена.**
+
+```bash
+curl -si $B/api/data
+```
+
+```
+HTTP/1.1 401 UNAUTHORIZED
+WWW-Authenticate: Bearer realm="api"
+X-Content-Type-Options: nosniff
+Content-Security-Policy: default-src 'none'; frame-ancestors 'none'
+X-Frame-Options: DENY
+Referrer-Policy: no-referrer
+Cache-Control: no-store
+```
+
+**6. Данные с токеном.**
+
+```bash
+curl -s $B/api/data -H "Authorization: Bearer $TOKEN" | pp
+```
+
+200, `"success": true` и список постов.
+
+**7. XSS: HTML в посте.**
+
+```bash
+curl -s -X POST $B/api/posts -H "Authorization: Bearer $TOKEN" -H "$J" -d '{"title": "<script>alert(1)</script>", "body": "<b>bold</b>"}' | pp
+```
+
+201, `"title": "&lt;script&gt;alert(1)&lt;/script&gt;"`, `"body": "&lt;b&gt;bold&lt;/b&gt;"`.
+
+**8. Поддельный токен.**
+
+```bash
+curl -s $B/api/data -H "Authorization: Bearer ${TOKEN%?????}AAAAA" | pp
+```
+
+401, `"error": "Недействительный или просроченный токен"`. Заменены последние 5 символов
+подписи: в последнем символе подписи HS256 есть биты-заполнители, поэтому замена одного символа
+не всегда меняет подпись.
+
+**9. Атака `alg: none`: токен без подписи.**
+
+```bash
+NONE=$(python -c "import jwt; print(jwt.encode({'sub': '1', 'iss': 'secure-rest-api', 'iat': 1, 'exp': 9999999999}, None, algorithm='none'))")
+echo $NONE
+curl -s $B/api/data -H "Authorization: Bearer $NONE" | pp
+```
+
+Токен заканчивается точкой (подписи нет), ответ 401: сервер принимает только HS256.
+
+**10. Mass assignment: подмена автора.**
+
+```bash
+curl -s -X POST $B/api/posts -H "Authorization: Bearer $TOKEN" -H "$J" -d '{"title": "t", "body": "b", "author": "admin"}' | pp
+```
+
+400: лишние поля запрещены, автор берётся только из токена.
+
+**11. SQL-инъекция в логине.**
+
+```bash
+curl -s -X POST $B/auth/login -H "$J" -d "{\"username\": \"' OR '1'='1' --\", \"password\": \"x\"}" | pp
+```
+
+401, `"error": "Неверный логин или пароль"`: значение ушло в базу параметром и ищется как
+обычный логин.
+
+**12. Перебор паролей.**
+
+```bash
+for i in 1 2 3 4 5; do curl -s -o /dev/null -w '%{http_code} ' -X POST $B/auth/login -H "$J" -d '{"username": "alice", "password": "wrong-password"}'; done; echo
+```
+
+Например `401 429 429 429 429`: не больше 5 попыток входа в минуту с одного IP, попытки из шагов
+2, 3 и 11 тоже считаются.
+
+Кириллицу в теле запроса из Windows лучше передавать файлом (`--data-binary @post.json`): curl в
+Windows отправляет `-d` в кодировке консоли, а не в UTF-8.
 
 ## Меры защиты
 
