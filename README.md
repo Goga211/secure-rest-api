@@ -12,21 +12,30 @@ pytest, ruff.
 
 ## Запуск
 
+Команды выполняются в Git Bash (Windows) или в терминале (Linux/macOS) и копируются как есть,
+ничего править руками не нужно.
+
+**Терминал 1: развернуть с нуля и запустить сервер.**
+
 ```bash
+git clone https://github.com/Goga211/secure-rest-api.git
+cd secure-rest-api
 python -m venv .venv
-source .venv/Scripts/activate        # Windows, Git Bash; Linux/macOS: source .venv/bin/activate
+source .venv/Scripts/activate        # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env                 # задать в .env JWT_SECRET, команда ниже
-flask --app wsgi init-db             # создать таблицы
-flask --app wsgi create-user alice   # пароль спросит скрыто
+cp .env.example .env
+sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(48))')/" .env
+flask --app wsgi init-db
+flask --app wsgi create-user alice --password correct-horse-battery
 flask --app wsgi run
 ```
 
-Секрет только генерировать, а не придумывать: стойкость даёт случайность, а не длина.
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"
-```
+- `sed` записывает в `.env` случайный секрет JWT (48 байт). Без секрета приложение не
+  запустится, а придумывать его нельзя: стойкость даёт случайность, а не длина.
+- `create-user` создаёт пользователя для проверки. Без `--password` пароль спрашивается скрыто.
+- Сервер работает в этом окне, остановить: `Ctrl+C`. Если проект уже развёрнут, повторный
+  запуск это только `cd secure-rest-api`, `source .venv/Scripts/activate` и
+  `flask --app wsgi run`: `cp .env.example .env` затёр бы готовый секрет.
 
 | Переменная | По умолчанию | Описание |
 |---|---|---|
@@ -38,7 +47,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 Логин при `create-user`: 3-64 символа (латиница, цифры, `.`, `-`, `_`), пароль от 12 символов и
 не длиннее 72 байт.
 
-Проверки локально:
+Тесты и сканеры локально (в папке проекта, venv активирован):
 
 ```bash
 pip install -r requirements-dev.txt
@@ -91,11 +100,13 @@ Dependency-Check принимает за пакеты. Откуда взялся
 
 ## Проверка через curl
 
-Двенадцать проверок, по одной на каждую меру защиты. Терминал 1: сервер (`flask --app wsgi run`).
-Терминал 2: один раз подготовка, дальше команды по шагам.
+Двенадцать проверок, по одной на каждую меру защиты. Сервер запущен в терминале 1 (раздел
+«Запуск»). Терминал 2: новое окно в той же папке, где делали `git clone`, один раз подготовка,
+дальше команды по шагам.
 
 ```bash
-source .venv/Scripts/activate        # Windows, Git Bash; Linux/macOS: source .venv/bin/activate
+cd secure-rest-api
+source .venv/Scripts/activate        # Linux/macOS: source .venv/bin/activate
 export PYTHONIOENCODING=utf-8
 B=http://127.0.0.1:5000
 J='Content-Type: application/json'
