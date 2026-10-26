@@ -126,15 +126,15 @@ curl -s -X POST $B/auth/login -H "$J" -d '{"username": "nobody", "password": "wr
 **3. Вход, получение JWT.**
 
 ```bash
-curl -s -X POST $B/auth/login -H "$J" -d '{"username": "alice", "password": "correct-horse-battery"}' | pp
+R=$(curl -s -X POST $B/auth/login -H "$J" -d '{"username": "alice", "password": "correct-horse-battery"}')
+echo "$R" | pp
+TOKEN=$(echo "$R" | python -c "import sys, json; print(json.load(sys.stdin)['data']['access_token'])")
+echo $TOKEN
 ```
 
-В ответе `access_token`, `"expires_in": 900`, `"token_type": "Bearer"`. Токен сохраняется в
-переменную для следующих шагов:
-
-```bash
-TOKEN=<access_token из ответа>
-```
+Ответ сервера сохраняется в `R` и печатается: `access_token`, `"expires_in": 900`,
+`"token_type": "Bearer"`. Токен из ответа кладётся в `TOKEN` для следующих шагов: `echo $TOKEN`
+печатает строку `eyJ...`. Если она пустая, шаги 4-10 не сработают, повтори шаг 3.
 
 **4. Что внутри токена.**
 
