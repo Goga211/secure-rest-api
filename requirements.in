@@ -1,7 +1,7 @@
 # Прямые зависимости: только то, что импортирует код приложения.
 # Полный список со всеми транзитивными зависимостями (requirements.txt) генерируется
 # командой ниже и вручную не правится:
-#   uv pip compile requirements.in --universal -o requirements.txt
+#   uv pip compile requirements.in --universal --python-version 3.12 --no-annotate -o requirements.txt
 bcrypt
 click
 Flask
