@@ -228,11 +228,12 @@ curl -s -X POST $B/auth/login -H "$J" -d "{\"username\": \"' OR '1'='1' --\", \"
 **12. Перебор паролей.**
 
 ```bash
-for i in 1 2 3 4 5; do curl -s -o /dev/null -w '%{http_code} ' -X POST $B/auth/login -H "$J" -d '{"username": "alice", "password": "wrong-password"}'; done; echo
+for i in 1 2 3 4 5 6; do curl -s -o /dev/null -w '%{http_code} ' -X POST $B/auth/login -H "$J" -d '{"username": "alice", "password": "wrong-password"}'; done; echo
 ```
 
-Например `401 429 429 429 429`: не больше 5 попыток входа в минуту с одного IP, попытки из шагов
-2, 3 и 11 тоже считаются.
+`401 401 401 401 401 429`: не больше 5 попыток входа в минуту с одного IP, шестая отклоняется.
+Если за последнюю минуту уже были входы (шаги 2, 3, 11), 429 начнётся раньше, например
+`401 401 429 429 429 429`.
 
 Кириллицу в теле запроса из Windows лучше передавать файлом (`--data-binary @post.json`): curl в
 Windows отправляет `-d` в кодировке консоли, а не в UTF-8.
