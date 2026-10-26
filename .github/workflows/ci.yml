@@ -31,6 +31,13 @@ jobs:
       - name: Установка зависимостей
         run: pip install -r requirements-dev.txt
 
+      # requirements.txt генерируется из requirements.in; если его поправили руками или забыли
+      # перегенерировать после правки requirements.in, файлы разойдутся и job упадёт
+      - name: requirements.txt соответствует requirements.in
+        run: |
+          uv pip compile requirements.in --universal --python-version 3.12 -o requirements.txt --quiet
+          git diff --exit-code requirements.txt
+
       - name: Ruff (линтер)
         run: ruff check .
 

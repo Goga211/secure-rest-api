@@ -1,0 +1,16 @@
+# Прямые зависимости: только то, что импортирует код приложения.
+# Полный список со всеми транзитивными зависимостями (requirements.txt) генерируется
+# командой ниже и вручную не правится:
+#   uv pip compile requirements.in --universal -o requirements.txt
+bcrypt
+click
+Flask
+Flask-Limiter
+Flask-SQLAlchemy
+MarkupSafe
+pydantic
+PyJWT
+python-dotenv
+SQLAlchemy
+# 3.1.8 и ниже уязвимы: CVE-2026-102598
+Werkzeug>=3.1.9
